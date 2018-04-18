@@ -60,16 +60,31 @@ class GaussianTransformer(TransformerMixin,BaseEstimator):
     def fit(self,X,y=None):
         # check and convert to 2D array
         X = self.__to_2D(X)
+        self.is_constant = np.zeros(X.shape[1],dtype=bool)
         for vidx in range(X.shape[1]):
             x = X[:,vidx]
+            if np.abs(np.diff(x)).sum() < 1e-10:
+                """
+                if the target value is almost constant,
+                the value will be not converted.
+                """
+                self.is_constant[vidx] = True
+                self.lin_tfs.append(None)
+                self.target_cdfs.append(None)
+                self._dtw_res.append(None)
+                self.warping_funcs.append(None)
+                self.inv_warping_funcs.append(None)
+                continue
             xmin = x.min(); xmax = x.max()
             xrange = xmax - xmin
             # create instance for index transformation
             mt = LinearTransformer(min_value=0,max_value=self.resolution).fit(x)
             self.lin_tfs.append(mt)
-            # calculate cdf of target variable
+            # estimate pdf by kde
             kde = KDEUnivariate(x)
             kde.fit()
+            kde.fit(bw=kde.bw*0.01)  # re-fit with tighter bandwidth
+            # calculate cdf of target variable
             cdf = kde.evaluate(np.linspace(xmin-xrange/2,xmax+xrange/2,self.resolution)).cumsum()
             cdf /= cdf.max()
             self.target_cdfs.append(cdf)
@@ -89,6 +104,9 @@ class GaussianTransformer(TransformerMixin,BaseEstimator):
         X = self.__to_2D(X)
         X_r = np.zeros_like(X)
         for vidx in range(X.shape[1]):
+            if self.is_constant[vidx]:
+                X_r[:,vidx] = X[:,vidx]
+                continue
             x = X[:,vidx]
             # get target cdf index
             x_idcs = self.lin_tfs[vidx].transform(x)
@@ -103,6 +121,9 @@ class GaussianTransformer(TransformerMixin,BaseEstimator):
         X = self.__to_2D(X)
         X_inv = np.zeros_like(X)
         for vidx in range(X.shape[1]):
+            if self.is_constant[vidx]:
+                X_inv[:,vidx] = X[:,vidx]
+                continue
             x = X[:,vidx]
             # get gaussian cdf index
             x_gauss_idcs = self.lin_tf_gcdf.transform(x)
